@@ -42,7 +42,7 @@ def get_user_input():
 def main():
     """Main function to run the Streamlit app."""
     load_dotenv()
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("ENV_VARIABLE")
 
     st.set_page_config(page_title="Excel Data Chatbot", page_icon=":bar_chart:")
     st.title("Excel Data Chatbot")
