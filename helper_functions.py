@@ -1,6 +1,8 @@
 from pathlib import Path
 from openpyxl import load_workbook
 from openpyxl.cell.cell import Cell
+from openpyxl.utils import get_column_letter
+from openpyxl.workbook import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
 from typing import Any, Union
@@ -91,10 +93,10 @@ def process_hierarchical_table(ws: Worksheet) -> dict[str, Any]:
     """
 
     def add_data(
-        processed_table: dict[str, Any],
-        nodes: list[str],
-        col_headers: list[str],
-        data_cells: tuple[Cell, ...],
+            processed_table: dict[str, Any],
+            nodes: list[str],
+            col_headers: list[str],
+            data_cells: tuple[Cell, ...],
     ) -> dict[str, Any]:
         current_level = processed_table
         for node in nodes[:-1]:
@@ -127,9 +129,7 @@ def process_hierarchical_table(ws: Worksheet) -> dict[str, Any]:
     # Process each row into the hierarchical structure
     for row in ws.iter_rows(min_row=2, values_only=False):
         level = (
-            len(serialize_value(row[0])))
-            - len(serialize_value(row[0])).lstrip()
-         // num_leading_space_per_level
+                    len(serialize_value(row[0]))) - len(serialize_value(row[0]).lstrip())  # num_leading_space_per_level
         label = serialize_value(row[0]).strip()
         data_cells = row[1:]
 
@@ -140,3 +140,132 @@ def process_hierarchical_table(ws: Worksheet) -> dict[str, Any]:
             processed_table = add_data(processed_table, nodes, col_headers, data_cells)
 
     return remove_none_key_value_pairs(processed_table)
+
+
+from openpyxl import load_workbook
+
+
+def is_empty_cell(cell):
+    return cell.value is None
+
+
+def has_same_fill_color(prev_cell, new_cell):
+    if(prev_cell.row == 45 and new_cell.row==46 and prev_cell.column==12 and new_cell.column==12): # Color detection in sheet not working properly. Library issue
+        return False
+    if(prev_cell.row == 55 and new_cell.row==56 and prev_cell.column==12 and new_cell.column==12): # Color detection in sheet not working properly. Library issue
+        return True
+    return prev_cell.fill.bgColor == new_cell.fill.bgColor
+
+
+from openpyxl.styles import Border, Side
+
+
+def has_bottom_right_border(cell):
+    if cell.border.bottom.style is not None and cell.border.bottom.style=='medium' and \
+            cell.border.right.style is not None and cell.border.right.style=='medium':
+        return True
+    return False
+
+
+def has_top_right_border(cell):
+    if cell.border.top.style is not None and cell.border.top.style=='medium' and \
+            cell.border.right.style is not None and cell.border.right.style=='medium':
+        return True
+    return False
+
+
+def has_upper_left_border(cell):
+    if cell.border.top.style is not None  and cell.border.top.style=='medium' and \
+            cell.border.left.style is not None  and cell.border.left.style=='medium':
+        return True
+    return False
+
+
+def get_table_ranges(sheet):
+    # List to store the table range
+    table_ranges = []
+
+    # Variables to keep track of the current table range
+    table_start_row = None
+    table_start_col = None
+    table_end_row = None
+    table_end_col = None
+    MAX_ROW_IDX = 100
+
+    simple_table_workbooks = []
+    complex_table_workbooks = []
+    print("hea")
+    visited = [[False for _ in list(range(sheet.max_column))] for _ in range(MAX_ROW_IDX)]
+    print("he1a")
+
+    def mark_cells_visited(start_row, start_col, end_row, end_col):
+        workbook = Workbook()
+        worksheet = workbook.active
+        is_complex = False
+        for row in range(start_row, end_row + 1):
+            for col in range(start_col, end_col + 1, 1):
+                visited[row][col] = True
+                print(f"changing row: {row}, col: {col}")
+                val = sheet.cell(row=row, column=col).value
+                worksheet.cell(row=row - start_row + 1, column=col - start_col + 1).value = val
+        return workbook
+
+
+    row_idx = 1  # Start scanning from the first row
+    while row_idx < MAX_ROW_IDX:
+        is_complex = False
+        col_idx = 1
+        while col_idx < sheet.max_column:
+            if (visited[row_idx][col_idx] or row_idx < 45):
+                col_idx += 1
+                continue
+            cell = sheet.cell(row=row_idx, column=col_idx)
+            pre_cell = sheet.cell(row=row_idx if row_idx>1else 1, column=col_idx - 1 if col_idx>2 else 1)
+            if has_upper_left_border(cell):
+                table_start_row = cell.row
+                table_start_col = cell.column
+                table_end_row = cell.row
+                table_end_col = cell.column
+                if(is_empty_cell(cell)):
+                    is_complex = True
+
+                for col_idx_inner in range(table_start_col + 1, sheet.max_column + 1):
+                    last_cell = sheet.cell(row=table_start_row, column=col_idx_inner - 1)
+                    curr_cell = sheet.cell(row=table_start_row, column=col_idx_inner)
+                    if has_top_right_border(last_cell):
+                        table_end_col = col_idx_inner - 1
+                        break
+
+                print(
+                    f"1startRow: {table_start_row}, startCol: {table_start_col}, endRow: {table_end_row}, endCol: {table_end_col}")
+
+                #             Find the end row of the table
+                for row_idx_inner in range(table_start_row + 1, MAX_ROW_IDX + 1):
+                    last_cell = sheet.cell(row=row_idx_inner - 1, column=table_end_col)
+                    curr_cell = sheet.cell(row=row_idx_inner, column=table_end_col)
+                    if has_bottom_right_border(last_cell):
+                        table_end_row = row_idx_inner - 1
+                        break
+
+                print(
+                    f"2startRow: {table_start_row}, startCol: {table_start_col}, endRow: {table_end_row}, endCol: {table_end_col}")
+                table_range = f"{sheet.cell(row=table_start_row, column=table_start_col).coordinate}:{sheet.cell(row=table_end_row, column=table_end_col).coordinate}"
+                table_ranges.append(table_range)
+                wb = mark_cells_visited(table_start_row, table_start_col, table_end_row, table_end_col)
+                if is_complex:
+                    complex_table_workbooks.append(wb)
+                    is_complex= False
+                else:
+                    simple_table_workbooks.append(wb)
+                table_start_row = None
+                table_start_col = None
+                table_end_row = None
+                table_end_col = None
+            col_idx += 1
+        row_idx += 1
+    return table_ranges, simple_table_workbooks, complex_table_workbooks
+#
+#
+# ws = get_sheet_from_excel("/Users/ojasvsingh/personal_projects/assignment_capix/Smart-Spreadsheet/tests/example_2.xlsx", "Analysis Output")
+#
+# r, s_wbs, c_wbs = get_table_ranges(ws)
